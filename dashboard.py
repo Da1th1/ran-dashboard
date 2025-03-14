@@ -46,6 +46,15 @@ sidebar_style = """
         background-color: rgba(255, 255, 255, 0.1);
     }
 
+    /* Sticky sidebar header */
+    .sidebar-header {
+        position: sticky;
+        top: 0;
+        background-color: #142656;
+        padding-bottom: 10px;
+        z-index: 999;
+    }
+
     /* Milestone box styles */
     .milestone-box {
         border: 1px solid #ddd;
@@ -92,6 +101,16 @@ sidebar_style = """
 """
 st.markdown(sidebar_style, unsafe_allow_html=True)
 
+# Sidebar header with sticky positioning
+with st.sidebar.container():
+    st.markdown('<div class="sidebar-header">', unsafe_allow_html=True)
+    try:
+        logo = Image.open("logo.png")
+        st.image(logo, width=150, caption="Cornerstone A&D")
+    except Exception as e:
+        st.error(f"Error loading logo: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # Title and description
 st.title("Cornerstone A&D Design Dashboard")
 st.markdown("This dashboard provides insights into the Cornerstone A&D Design Master Tracker data.")
@@ -99,92 +118,44 @@ st.markdown("This dashboard provides insights into the Cornerstone A&D Design Ma
 # Load data
 @st.cache_data
 def load_data():
+    notifications = []  # Collect notifications here
     try:
-        # Load main dataset
         main_df = pd.read_csv("Cornerstone - A&D - Design Master Tracker.csv", low_memory=False)
-        
-        # Initialize a dictionary to store all dataframes
-        all_dfs = {"Main": main_df}
-        
-        # Check and load the additional files
+
         additional_files = [
             {"file": "KTL - Internal Electricals Workbook - Electricals Pending.csv", "name": "Electricals"},
             {"file": "KTL - Internal Structural Workbook - Structural to be Completed.csv", "name": "Structural"},
             {"file": "Design - Dependencies - STATS Required.csv", "name": "Dependencies"}
         ]
-        
+
+        merged_df = main_df.copy()
+
         for file_info in additional_files:
             try:
                 df = pd.read_csv(file_info["file"], low_memory=False)
-                all_dfs[file_info["name"]] = df
-                st.sidebar.success(f"Loaded {file_info['name']} data: {len(df)} records")
+                connection_field = "Site ID"
+
+                if connection_field in df.columns and connection_field in merged_df.columns:
+                    exclude_cols = [col for col in df.columns if col in merged_df.columns and col != connection_field]
+                    include_cols = [col for col in df.columns if col not in exclude_cols or col == connection_field]
+
+                    rename_dict = {col: f"{file_info['name']}_{col}" for col in include_cols if col != connection_field}
+                    df_to_merge = df[include_cols].rename(columns=rename_dict)
+
+                    merged_df = pd.merge(merged_df, df_to_merge, on=connection_field, how="left")
+                    notifications.append(f"✅ Merged {file_info['name']} data successfully.")
+                else:
+                    notifications.append(f"⚠️ '{connection_field}' not found in both dataframes for {file_info['name']}.")
             except Exception as e:
-                st.sidebar.warning(f"Could not load {file_info['name']} data: {e}")
-        
-        # Merge files if they contain Internal ID
-        merged_df = main_df.copy()
-        
-        # For each additional dataframe, merge if it has Internal ID
-        for name, df in all_dfs.items():
-            if name == "Main":
-                continue
-                
-            # Check if Internal ID column exists
-            if "Internal ID" in df.columns:
-                # Check if the main dataframe has Internal ID too
-                if "Internal ID" not in merged_df.columns:
-                    # If not, just add the new dataframes as separate entities
-                    st.sidebar.warning(f"Main dataframe doesn't have 'Internal ID', cannot merge {name} data")
-                    continue
-                
-                # Determine columns to merge (exclude duplicates except Internal ID)
-                exclude_cols = [col for col in df.columns if col in merged_df.columns and col != "Internal ID"]
-                include_cols = [col for col in df.columns if col not in exclude_cols or col == "Internal ID"]
-                
-                # Rename columns to avoid conflicts
-                rename_dict = {col: f"{name}_{col}" for col in include_cols if col != "Internal ID"}
-                df_to_merge = df[include_cols].copy()
-                df_to_merge.rename(columns=rename_dict, inplace=True)
-                
-                # Merge with main dataframe
-                merged_df = pd.merge(
-                    merged_df, 
-                    df_to_merge,
-                    on="Internal ID",
-                    how="left"
-                )
-                
-                st.sidebar.success(f"Merged {name} data based on Internal ID")
-            elif "Site ID" in df.columns and "Site ID" in merged_df.columns:
-                # If no Internal ID, try using Site ID as alternative
-                # Determine columns to merge (exclude duplicates except Site ID)
-                exclude_cols = [col for col in df.columns if col in merged_df.columns and col != "Site ID"]
-                include_cols = [col for col in df.columns if col not in exclude_cols or col == "Site ID"]
-                
-                # Rename columns to avoid conflicts
-                rename_dict = {col: f"{name}_{col}" for col in include_cols if col != "Site ID"}
-                df_to_merge = df[include_cols].copy()
-                df_to_merge.rename(columns=rename_dict, inplace=True)
-                
-                # Merge with main dataframe
-                merged_df = pd.merge(
-                    merged_df, 
-                    df_to_merge,
-                    on="Site ID",
-                    how="left"
-                )
-                
-                st.sidebar.success(f"Merged {name} data based on Site ID")
-            else:
-                st.sidebar.warning(f"No common identifier found to merge {name} data")
-        
-        # Add info about data sources
-        st.sidebar.info(f"Final dataset has {len(merged_df)} rows and {len(merged_df.columns)} columns")
-        
-        return merged_df
+                notifications.append(f"⚠️ Could not load {file_info['name']} data: {e}")
+
+        notifications.append(f"ℹ️ Final dataset has {len(merged_df)} rows and {len(merged_df.columns)} columns")
+
+        return merged_df, notifications
+
     except Exception as e:
-        st.error(f"Error loading data: {e}")
-        return None
+        notifications.append(f"❌ Error loading data: {e}")
+        return None, notifications
 
 # Clean and prepare data
 @st.cache_data
@@ -295,14 +266,19 @@ def create_milestone_box(title, forecast_col, actual_col, data):
 
 # Main function
 def main():
-    # Load and display the logo in the sidebar
-    try:
-        logo = Image.open("logo.png")
-        st.sidebar.image(logo, width=150, caption="Cornerstone A&D")
-    except Exception as e:
-        st.sidebar.error(f"Error loading logo: {e}")
+    df, notifications = load_data()
     
-    df = load_data()
+    # Group notifications into an expandable section
+    with st.sidebar.expander("🔔 Notifications", expanded=False):
+        for note in notifications:
+            if note.startswith("✅"):
+                st.success(note[2:].strip())
+            elif note.startswith("⚠️"):
+                st.warning(note[2:].strip())
+            elif note.startswith("❌"):
+                st.error(note[2:].strip())
+            else:
+                st.info(note[2:].strip())
     
     if df is not None:
         data = prepare_data(df)
@@ -470,7 +446,11 @@ def main():
                 data = data[data['KTL Project Name'] == selected_project]
         
         # Dashboard tabs
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Overview", "Project Status", "Timeline Analysis", "KPI Metrics", "Resources", "Data Integration", "Detailed Data"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, new_tab, dd_tab = st.tabs([
+            "Overview", "Project Status", "Timeline Analysis", "KPI Metrics", 
+            "Resources", "Data Integration", "Project Metrics", "Detailed Data", 
+            "Weekly Metrics", "Detailed Design"
+        ])
         
         with tab1:
             st.header("Overview")
@@ -1325,27 +1305,22 @@ def main():
                             
                             # Gather all resource info for this project
                             resource_info = {}
-                            
                             for col in existing_resource_columns:
                                 if col in project_data.columns and not project_data[col].isna().all():
                                     resource_info[col] = project_data[col].iloc[0]
-                            
-                            # Create a dataframe for the resources
+
                             if resource_info:
                                 resource_df = pd.DataFrame({
                                     'Resource Type': list(resource_info.keys()),
                                     'Assigned To': list(resource_info.values())
                                 })
-                                
                                 st.dataframe(resource_df, use_container_width=True)
                             else:
                                 st.info("No resource information available for this project.")
                         else:
                             st.warning(f"No data available for project {selected_project}.")
                     else:
-                        st.warning("No project name column identified in the dataset.")
-            else:
-                st.warning("No resource columns found in the dataset. Please check column names.")
+                        st.warning("No project names found in the dataset.")
 
         with tab6:
             st.header("Data Integration Dashboard")
@@ -1478,8 +1453,6 @@ def main():
                             title="Structural Records by Status"
                         )
                         st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("No structural status data available")
             
             # Analysis of dependencies data
             if "Dependencies_STATS Required" in data.columns:
@@ -1525,6 +1498,280 @@ def main():
                 st.info("Missing vendor data for cross-service analysis")
 
         with tab7:
+            st.header("Project Metrics")
+            
+            # Check for NS Status column and provide column selection if not found
+            status_column = None
+            
+            if 'NS Status' in data.columns:
+                status_column = 'NS Status'
+                st.success("Found 'NS Status' column in the dataset.")
+            else:
+                st.warning("The column named exactly 'NS Status' was not found in your dataset.")
+                # Show all column names to help identify the actual status column
+                st.subheader("Available Columns")
+                st.write("Here are the first 15 columns in your dataset:")
+                st.write(data.columns[:15].tolist())
+                
+                # Try to find columns that might be the status column
+                possible_status_cols = [col for col in data.columns if 'status' in col.lower() or 'state' in col.lower()]
+                
+                if possible_status_cols:
+                    st.write("These columns might contain status information:")
+                    
+                    # Let user select which column to use as status
+                    status_column = st.selectbox(
+                        "Select a column to use as status:",
+                        options=['None'] + possible_status_cols,
+                        index=0
+                    )
+                    
+                    if status_column == 'None':
+                        status_column = None
+                    else:
+                        st.success(f"Using '{status_column}' as the status column")
+                else:
+                    st.error("No columns with 'status' or 'state' in their names were found.")
+            
+            # Calculate key metrics
+            col1, col2, col3 = st.columns(3)
+            
+            # 1. Instructed Pot (count of NS Status = In Progress)
+            instructed_pot = 0
+            if status_column in data.columns:
+                instructed_pot = len(data[data[status_column] == 'In Progress'])
+            
+            # 2. DD Issued (count of DD Issued Client (A) with values)
+            dd_issued = 0
+            if 'DD Issued Client (A)' in data.columns:
+                dd_issued = len(data[data['DD Issued Client (A)'].notna()])
+            
+            # 3. DD Pending Issue (Instructed Pot - DD Issued)
+            dd_pending = instructed_pot - dd_issued
+            
+            # Display metrics
+            with col1:
+                st.metric("Instructed Pot", instructed_pot)
+                st.markdown("*Projects with 'In Progress' status*")
+            
+            with col2:
+                st.metric("DD Issued", dd_issued)
+                st.markdown("*Projects with DD already issued to client*")
+            
+            with col3:
+                st.metric("DD Pending Issue", dd_pending)
+                st.markdown("*Projects waiting for DD to be issued*")
+            
+            # If status column is available, show the rest of the content
+            if status_column:
+                # Show progress visualization
+                st.subheader("DD Issuance Progress")
+                
+                # Calculate percentage completion
+                if instructed_pot > 0:
+                    completion_pct = (dd_issued / instructed_pot) * 100
+                else:
+                    completion_pct = 0
+                
+                # Create progress bar
+                st.progress(completion_pct / 100)
+                st.markdown(f"**{completion_pct:.1f}%** of in-progress projects have had DD issued")
+                
+                # Create columns for pie chart and bar chart
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Pie chart showing DD issued vs pending
+                    pie_data = pd.DataFrame({
+                        'Status': ['DD Issued', 'DD Pending'],
+                        'Count': [dd_issued, dd_pending]
+                    })
+                    
+                    fig = px.pie(
+                        pie_data,
+                        values='Count',
+                        names='Status',
+                        title='DD Issuance Status',
+                        color='Status',
+                        color_discrete_map={'DD Issued': '#2E7D32', 'DD Pending': '#FF5722'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    # Bar chart comparing instructed pot vs DD issued
+                    bar_data = pd.DataFrame({
+                        'Category': ['Instructed Pot', 'DD Issued', 'DD Pending'],
+                        'Count': [instructed_pot, dd_issued, dd_pending]
+                    })
+                    
+                    fig = px.bar(
+                        bar_data,
+                        x='Category',
+                        y='Count',
+                        title='Project Metrics Comparison',
+                        color='Category',
+                        color_discrete_map={
+                            'Instructed Pot': '#1976D2', 
+                            'DD Issued': '#2E7D32',
+                            'DD Pending': '#FF5722'
+                        }
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Site Type breakdown for DD Pending projects
+                if all(col in data.columns for col in ['Site Type', 'DD Issued Client (A)']):
+                    st.subheader("DD Pending by Site Type")
+                    
+                    # Filter for in progress projects that don't have DD issued
+                    pending_projects = data[
+                        (data[status_column] == 'In Progress') & 
+                        (data['DD Issued Client (A)'].isna())
+                    ]
+                    
+                    site_type_counts = pending_projects['Site Type'].value_counts().reset_index()
+                    site_type_counts.columns = ['Site Type', 'Pending Count']
+                    
+                    # Create horizontal bar chart sorted by count
+                    site_type_counts = site_type_counts.sort_values('Pending Count', ascending=True)
+                    
+                    fig = px.bar(
+                        site_type_counts,
+                        y='Site Type',
+                        x='Pending Count',
+                        title='DD Pending by Site Type',
+                        orientation='h',
+                        color='Pending Count',
+                        color_continuous_scale='Oranges'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Timeline projection
+                st.subheader("DD Issuance Timeline Projection")
+                
+                # Calculate average time from in progress to DD issuance (for completed projects)
+                if all(col in data.columns for col in ['DD Issued Client (A)', 'Instruction Date']):
+                    # Filter for projects that have both instruction date and DD issued date
+                    completed_projects = data[
+                        (data['DD Issued Client (A)'].notna()) & 
+                        (data['Instruction Date'].notna())
+                    ].copy()
+                    
+                    if not completed_projects.empty:
+                        # Calculate duration in days
+                        completed_projects['Duration_Days'] = (
+                            completed_projects['DD Issued Client (A)'] - 
+                            completed_projects['Instruction Date']
+                        ).dt.days
+                        
+                        # Filter out negative durations (likely data errors)
+                        completed_projects = completed_projects[completed_projects['Duration_Days'] >= 0]
+                        
+                        if not completed_projects.empty:
+                            # Calculate average duration
+                            avg_duration = completed_projects['Duration_Days'].median()  # Using median to avoid outlier effects
+                            
+                            # Create projection chart
+                            st.markdown(f"Based on historical data, projects take an average of **{avg_duration:.0f} days** from instruction to DD issuance.")
+                            
+                            # Make sure we have the required columns for pending projects
+                            if all(col in data.columns for col in ['DD Issued Client (A)', 'Instruction Date']):
+                                # Filter for pending projects with instruction dates
+                                pending_projects = data[
+                                    (data[status_column] == 'In Progress') & 
+                                    (data['DD Issued Client (A)'].isna())
+                                ]
+                                
+                                # Show projects that are approaching or have exceeded the average duration
+                                pending_with_dates = pending_projects[pending_projects['Instruction Date'].notna()].copy()
+                                
+                                if not pending_with_dates.empty:
+                                    # Calculate days since instruction
+                                    pending_with_dates['Days_Since_Instruction'] = (
+                                        pd.Timestamp.now() - 
+                                        pending_with_dates['Instruction Date']
+                                    ).dt.days
+                                    
+                                    # Calculate percentage of average duration
+                                    pending_with_dates['Percent_of_Avg'] = (
+                                        pending_with_dates['Days_Since_Instruction'] / avg_duration
+                                    ) * 100
+                                    
+                                    # Flag projects as: On Track, At Risk, or Overdue
+                                    pending_with_dates['Status'] = pending_with_dates['Percent_of_Avg'].apply(
+                                        lambda x: 'On Track' if x < 80 else ('At Risk' if x < 100 else 'Overdue')
+                                    )
+                                    
+                                    # Count by status
+                                    status_counts = pending_with_dates['Status'].value_counts().reset_index()
+                                    status_counts.columns = ['Status', 'Count']
+                                    
+                                    # Create horizontal bar chart
+                                    fig = px.bar(
+                                        status_counts,
+                                        y='Status',
+                                        x='Count',
+                                        title='DD Pending Projects Timeline Status',
+                                        orientation='h',
+                                        color='Status',
+                                        color_discrete_map={
+                                            'On Track': '#4CAF50',
+                                            'At Risk': '#FF9800',
+                                            'Overdue': '#F44336'
+                                        },
+                                        category_orders={"Status": ["On Track", "At Risk", "Overdue"]}
+                                    )
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Show table of overdue projects
+                                    overdue_projects = pending_with_dates[pending_with_dates['Status'] == 'Overdue']
+                                    if not overdue_projects.empty:
+                                        st.subheader("Overdue Projects")
+                                        
+                                        # Format the display dataframe
+                                        display_columns = ['Site ID', 'Site Type', 'Instruction Date', 'Days_Since_Instruction']
+                                        display_df = overdue_projects[
+                                            [col for col in display_columns if col in overdue_projects.columns]
+                                        ].copy()
+                                        
+                                        # Rename columns for better display
+                                        col_rename = {
+                                            'Days_Since_Instruction': 'Days Since Instruction'
+                                        }
+                                        display_df.rename(columns=col_rename, inplace=True)
+                                        
+                                        # Sort by days since instruction (descending)
+                                        display_df = display_df.sort_values('Days Since Instruction', ascending=False)
+                                        
+                                        # Show the table
+                                        st.dataframe(display_df, use_container_width=True)
+                                else:
+                                    st.info("No pending projects with instruction dates found.")
+                            else:
+                                st.info("Missing required columns to calculate pending project timelines.")
+                        else:
+                            st.info("No valid duration data available after filtering.")
+                    else:
+                        st.info("No projects with both instruction and DD issued dates found.")
+                else:
+                    st.info("Missing required columns for timeline projection analysis.")
+            else:
+                # If no status column is available/selected, provide helpful information
+                st.warning("""
+                To use this tab properly, you need to select a column containing status information. 
+                Without this, we can't calculate the number of in-progress projects or pending DDs.
+                
+                Look for a column in your dataset that contains values like 'In Progress', 'Closed', etc.
+                """)
+                
+                # Display info about all columns
+                with st.expander("Show all columns in your dataset"):
+                    st.write(data.columns.tolist())
+            
+            # Always show information about DD Issued column
+            if 'DD Issued Client (A)' not in data.columns:
+                st.warning("Note: The 'DD Issued Client (A)' column is not available in your dataset. This tab requires this column to calculate metrics properly.")
+
+        with tab8:
             st.header("Detailed Data")
             
             # Show raw data with search functionality
@@ -1548,6 +1795,277 @@ def main():
                 file_name="filtered_cornerstone_data.csv",
                 mime="text/csv",
             )
+
+        with new_tab:
+            st.header("Weekly Metrics Overview")
+
+            # Example of how you might structure one of the tables
+            # You would need to adjust this based on how your data is structured
+            # and how you calculate the metrics shown in the image
+
+            # Example data preparation for GA/FEAS
+            ga_feas_data = {
+                'Week No.': [10, 11, 12, 13],
+                'W/C': ['03/03/2025', '10/03/2025', '17/03/2025', '24/03/2025'],
+                'FC': [5, 5, 5, 5],
+                'AC': [2, 0, 0, 0],
+                'Delta': [-3, -5, -5, -5],
+                'Cumulative': [-3, -8, -13, -18]
+            }
+            ga_feas_df = pd.DataFrame(ga_feas_data)
+
+            # Display the table
+            st.subheader("GA/FEAS Metrics")
+            st.table(ga_feas_df)
+
+            # Repeat the above for each category like DD, CNX Feasibility, etc.
+            # You would need to prepare and display a DataFrame for each
+
+        with dd_tab:
+            st.header("Detailed Design Analysis")
+            
+            # Add DD process milestone counts at the top of Detailed Design tab
+            st.subheader("Detailed Design Process Counts")
+            
+            # Define the DD process columns to count
+            dd_process_columns = [
+                "DD Issued Client (A)",
+                "DD Approved Client (A)",
+                "DD Issued to Operator (A)"
+            ]
+            
+            # Create a 3-column layout for the DD process boxes
+            dd_cols = st.columns(3)
+            
+            # Add DD process count boxes
+            for i, column in enumerate(dd_process_columns):
+                with dd_cols[i]:
+                    if column in data.columns:
+                        # Convert to string first to handle different formats
+                        col_data = data[column].astype(str)
+                        # Count entries that are not empty strings, NaN, 'nan', or '01/01/1900'
+                        count = sum((col_data.notna()) & 
+                                 (col_data != '') & 
+                                 (col_data != 'nan') & 
+                                 (col_data != 'NaT') &
+                                 (col_data != '01/01/1900'))
+                        
+                        # Create an HTML box with just the count (no forecast column needed)
+                        box_title = column.replace(" (A)", "").replace("\n", " ")
+                        html = f"""
+                        <div class="milestone-box">
+                            <div class="milestone-title">{box_title}</div>
+                            <div class="count-number" style="font-size: 2em; font-weight: bold; color: #142656; padding: 10px 0;">{count}</div>
+                        </div>
+                        """
+                        st.markdown(html, unsafe_allow_html=True)
+                    else:
+                        st.warning(f"Column '{column}' not found in the dataset")
+            
+            # Add DD Forecast vs Actual line graph
+            st.subheader("DD Forecast vs Actual Dates")
+            
+            # Check if both DD (F) and DD Issued Client (A) columns exist and are datetime
+            if all(col in data.columns for col in ["DD\n(F)", "DD Issued Client (A)"]):
+                # Filter out rows where either date is missing
+                date_data = data[(data["DD\n(F)"].notna()) & (data["DD Issued Client (A)"].notna())].copy()
+                
+                if not date_data.empty:
+                    # Convert data for visualization
+                    # Create a new dataframe with the dates and their frequencies by month
+                    dd_f_counts = date_data.groupby(date_data["DD\n(F)"].dt.strftime('%Y-%m')).size().reset_index()
+                    dd_f_counts.columns = ['Month', 'Count']
+                    # Sort by month to ensure correct cumulative calculation
+                    dd_f_counts = dd_f_counts.sort_values('Month')
+                    # Calculate cumulative sum
+                    dd_f_counts['Cumulative'] = dd_f_counts['Count'].cumsum()
+                    dd_f_counts['Type'] = 'Forecast'
+                    
+                    dd_actual_counts = date_data.groupby(date_data["DD Issued Client (A)"].dt.strftime('%Y-%m')).size().reset_index()
+                    dd_actual_counts.columns = ['Month', 'Count']
+                    # Sort by month to ensure correct cumulative calculation
+                    dd_actual_counts = dd_actual_counts.sort_values('Month')
+                    # Calculate cumulative sum
+                    dd_actual_counts['Cumulative'] = dd_actual_counts['Count'].cumsum()
+                    dd_actual_counts['Type'] = 'Actual'
+                    
+                    # Combine the dataframes
+                    combined_df = pd.concat([dd_f_counts, dd_actual_counts])
+                    
+                    # Create the line chart with cumulative values
+                    fig = px.line(
+                        combined_df, 
+                        x='Month', 
+                        y='Cumulative', 
+                        color='Type',
+                        title='Cumulative DD Forecast vs Actual Dates by Month',
+                        markers=True,
+                        labels={'Month': 'Month-Year', 'Cumulative': 'Cumulative Number of Projects'},
+                        color_discrete_map={'Forecast': '#3366CC', 'Actual': '#FF9900'}
+                    )
+                    
+                    # Customize the layout
+                    fig.update_layout(
+                        xaxis_title="Month-Year",
+                        yaxis_title="Cumulative Number of Projects",
+                        legend_title="Date Type",
+                        hovermode="x unified"
+                    )
+                    
+                    # Show the chart
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Add monthly comparison graph as well
+                    st.subheader("Monthly DD Forecast vs Actual")
+                    monthly_fig = px.bar(
+                        combined_df,
+                        x='Month',
+                        y='Count',
+                        color='Type',
+                        barmode='group',
+                        title='Monthly DD Forecast vs Actual Counts',
+                        labels={'Month': 'Month-Year', 'Count': 'Number of Projects'},
+                        color_discrete_map={'Forecast': '#3366CC', 'Actual': '#FF9900'}
+                    )
+                    
+                    # Customize the monthly layout
+                    monthly_fig.update_layout(
+                        xaxis_title="Month-Year",
+                        yaxis_title="Number of Projects",
+                        legend_title="Date Type"
+                    )
+                    
+                    st.plotly_chart(monthly_fig, use_container_width=True)
+                    
+                    # Add analysis of on-time delivery
+                    on_time_count = sum(date_data["DD Issued Client (A)"] <= date_data["DD\n(F)"])
+                    delayed_count = sum(date_data["DD Issued Client (A)"] > date_data["DD\n(F)"])
+                    total_count = len(date_data)
+                    
+                    # Calculate percentages
+                    on_time_pct = (on_time_count / total_count) * 100 if total_count > 0 else 0
+                    delayed_pct = (delayed_count / total_count) * 100 if total_count > 0 else 0
+                    
+                    # Display metrics
+                    st.subheader("DD Delivery Performance")
+                    metrics_cols = st.columns(3)
+                    
+                    with metrics_cols[0]:
+                        st.metric("Total Projects With Both Dates", total_count)
+                    
+                    with metrics_cols[1]:
+                        st.metric("On Time or Early Delivery", f"{on_time_count} ({on_time_pct:.1f}%)")
+                    
+                    with metrics_cols[2]:
+                        st.metric("Delayed Delivery", f"{delayed_count} ({delayed_pct:.1f}%)")
+                    
+                    # Calculate average delay for delayed projects
+                    if delayed_count > 0:
+                        delayed_projects = date_data[date_data["DD Issued Client (A)"] > date_data["DD\n(F)"]]
+                        avg_delay = (delayed_projects["DD Issued Client (A)"] - delayed_projects["DD\n(F)"]).dt.days.mean()
+                        
+                        st.info(f"For delayed projects, the average delay is {avg_delay:.1f} days.")
+                else:
+                    st.info("No projects found with both forecast and actual DD dates.")
+            else:
+                missing_cols = []
+                if "DD\n(F)" not in data.columns:
+                    missing_cols.append("DD (F)")
+                if "DD Issued Client (A)" not in data.columns:
+                    missing_cols.append("DD Issued Client (A)")
+                
+                st.warning(f"Cannot create comparison chart. Missing columns: {', '.join(missing_cols)}")
+            
+            # Check if DD Status column exists
+            if 'DD Status' in data.columns:
+                # Count by DD Status
+                dd_status_counts = data['DD Status'].value_counts().reset_index()
+                dd_status_counts.columns = ['Status', 'Count']
+                
+                # Create visualization section
+                st.subheader("DD Status Distribution")
+                
+                # Create two columns for different chart types
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Bar chart
+                    fig_bar = px.bar(
+                        dd_status_counts,
+                        x='Status',
+                        y='Count',
+                        title='DD Status Distribution',
+                        color='Count',
+                        color_continuous_scale='Viridis'
+                    )
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                
+                with col2:
+                    # Pie chart
+                    fig_pie = px.pie(
+                        dd_status_counts,
+                        values='Count',
+                        names='Status',
+                        title='DD Status Distribution (%)'
+                    )
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                # Table of status counts
+                st.subheader("DD Status Counts")
+                st.dataframe(dd_status_counts.sort_values('Count', ascending=False), use_container_width=True)
+                
+                # Show additional metrics if possible
+                if 'DD Issued Client (A)' in data.columns:
+                    # Calculate stats about DD issuance
+                    dd_issued_count = len(data[data['DD Issued Client (A)'].notna()])
+                    total_count = len(data)
+                    
+                    # Create metrics row
+                    st.subheader("DD Key Metrics")
+                    metric_cols = st.columns(3)
+                    
+                    with metric_cols[0]:
+                        st.metric("Total Projects", total_count)
+                    
+                    with metric_cols[1]:
+                        st.metric("DD Issued Count", dd_issued_count)
+                    
+                    with metric_cols[2]:
+                        dd_issued_pct = (dd_issued_count / total_count) * 100 if total_count > 0 else 0
+                        st.metric("DD Issued Percentage", f"{dd_issued_pct:.1f}%")
+            else:
+                st.warning("The 'DD Status' column was not found in your dataset. Please ensure this column exists to view DD status distributions.")
+                
+                # Show available columns as reference
+                with st.expander("Available columns in dataset"):
+                    st.write(data.columns.tolist())
+                
+                # Look for similar columns that might contain DD status info
+                dd_related_cols = [col for col in data.columns if 'dd' in col.lower() and 'status' in col.lower()]
+                if dd_related_cols:
+                    st.info("The following columns might contain DD status information:")
+                    st.write(dd_related_cols)
+                    
+                    # Allow selecting an alternative column
+                    alt_status_col = st.selectbox(
+                        "Select an alternative column for DD Status:",
+                        options=['None'] + dd_related_cols,
+                        index=0
+                    )
+                    
+                    if alt_status_col != 'None':
+                        # Use the alternative column for visualization
+                        alt_status_counts = data[alt_status_col].value_counts().reset_index()
+                        alt_status_counts.columns = ['Status', 'Count']
+                        
+                        st.subheader(f"Status Distribution using '{alt_status_col}'")
+                        fig = px.pie(
+                            alt_status_counts,
+                            values='Count',
+                            names='Status',
+                            title=f"{alt_status_col} Distribution"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
 
 if __name__ == "__main__":
     main() 
