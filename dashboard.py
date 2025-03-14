@@ -100,8 +100,88 @@ st.markdown("This dashboard provides insights into the Cornerstone A&D Design Ma
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv("Cornerstone - A&D - Design Master Tracker.csv", low_memory=False)
-        return df
+        # Load main dataset
+        main_df = pd.read_csv("Cornerstone - A&D - Design Master Tracker.csv", low_memory=False)
+        
+        # Initialize a dictionary to store all dataframes
+        all_dfs = {"Main": main_df}
+        
+        # Check and load the additional files
+        additional_files = [
+            {"file": "KTL - Internal Electricals Workbook - Electricals Pending.csv", "name": "Electricals"},
+            {"file": "KTL - Internal Structural Workbook - Structural to be Completed.csv", "name": "Structural"},
+            {"file": "Design - Dependencies - STATS Required.csv", "name": "Dependencies"}
+        ]
+        
+        for file_info in additional_files:
+            try:
+                df = pd.read_csv(file_info["file"], low_memory=False)
+                all_dfs[file_info["name"]] = df
+                st.sidebar.success(f"Loaded {file_info['name']} data: {len(df)} records")
+            except Exception as e:
+                st.sidebar.warning(f"Could not load {file_info['name']} data: {e}")
+        
+        # Merge files if they contain Internal ID
+        merged_df = main_df.copy()
+        
+        # For each additional dataframe, merge if it has Internal ID
+        for name, df in all_dfs.items():
+            if name == "Main":
+                continue
+                
+            # Check if Internal ID column exists
+            if "Internal ID" in df.columns:
+                # Check if the main dataframe has Internal ID too
+                if "Internal ID" not in merged_df.columns:
+                    # If not, just add the new dataframes as separate entities
+                    st.sidebar.warning(f"Main dataframe doesn't have 'Internal ID', cannot merge {name} data")
+                    continue
+                
+                # Determine columns to merge (exclude duplicates except Internal ID)
+                exclude_cols = [col for col in df.columns if col in merged_df.columns and col != "Internal ID"]
+                include_cols = [col for col in df.columns if col not in exclude_cols or col == "Internal ID"]
+                
+                # Rename columns to avoid conflicts
+                rename_dict = {col: f"{name}_{col}" for col in include_cols if col != "Internal ID"}
+                df_to_merge = df[include_cols].copy()
+                df_to_merge.rename(columns=rename_dict, inplace=True)
+                
+                # Merge with main dataframe
+                merged_df = pd.merge(
+                    merged_df, 
+                    df_to_merge,
+                    on="Internal ID",
+                    how="left"
+                )
+                
+                st.sidebar.success(f"Merged {name} data based on Internal ID")
+            elif "Site ID" in df.columns and "Site ID" in merged_df.columns:
+                # If no Internal ID, try using Site ID as alternative
+                # Determine columns to merge (exclude duplicates except Site ID)
+                exclude_cols = [col for col in df.columns if col in merged_df.columns and col != "Site ID"]
+                include_cols = [col for col in df.columns if col not in exclude_cols or col == "Site ID"]
+                
+                # Rename columns to avoid conflicts
+                rename_dict = {col: f"{name}_{col}" for col in include_cols if col != "Site ID"}
+                df_to_merge = df[include_cols].copy()
+                df_to_merge.rename(columns=rename_dict, inplace=True)
+                
+                # Merge with main dataframe
+                merged_df = pd.merge(
+                    merged_df, 
+                    df_to_merge,
+                    on="Site ID",
+                    how="left"
+                )
+                
+                st.sidebar.success(f"Merged {name} data based on Site ID")
+            else:
+                st.sidebar.warning(f"No common identifier found to merge {name} data")
+        
+        # Add info about data sources
+        st.sidebar.info(f"Final dataset has {len(merged_df)} rows and {len(merged_df.columns)} columns")
+        
+        return merged_df
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return None
@@ -390,7 +470,7 @@ def main():
                 data = data[data['KTL Project Name'] == selected_project]
         
         # Dashboard tabs
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Overview", "Project Status", "Timeline Analysis", "KPI Metrics", "Resources", "Detailed Data"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Overview", "Project Status", "Timeline Analysis", "KPI Metrics", "Resources", "Data Integration", "Detailed Data"])
         
         with tab1:
             st.header("Overview")
@@ -1268,6 +1348,183 @@ def main():
                 st.warning("No resource columns found in the dataset. Please check column names.")
 
         with tab6:
+            st.header("Data Integration Dashboard")
+            
+            # Create sections for each data source
+            st.subheader("Data Source Integration")
+            
+            # Metrics row showing integration stats
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Main Dataset Records", len(data))
+            
+            # Count records from each source that were successfully merged
+            with col2:
+                electricals_count = sum("Electricals_Vendor" in data.columns and pd.notna(data["Electricals_Vendor"]))
+                st.metric("Electrical Records Merged", electricals_count)
+            
+            with col3:
+                structural_count = sum("Structural_Vendor" in data.columns and pd.notna(data["Structural_Vendor"]))
+                st.metric("Structural Records Merged", structural_count)
+            
+            with col4:
+                dependencies_count = sum("Dependencies_STATS Required" in data.columns and pd.notna(data["Dependencies_STATS Required"]))
+                st.metric("Dependencies Records Merged", dependencies_count)
+            
+            # Create a visualization showing the overlap between datasets
+            st.subheader("Data Integration Overlap")
+            
+            # Calculate overlaps
+            has_electricals = sum("Electricals_Vendor" in data.columns and pd.notna(data["Electricals_Vendor"]))
+            has_structural = sum("Structural_Vendor" in data.columns and pd.notna(data["Structural_Vendor"]))
+            has_dependencies = sum("Dependencies_STATS Required" in data.columns and pd.notna(data["Dependencies_STATS Required"]))
+            
+            has_electricals_and_structural = sum(
+                "Electricals_Vendor" in data.columns and 
+                "Structural_Vendor" in data.columns and 
+                pd.notna(data["Electricals_Vendor"]) & 
+                pd.notna(data["Structural_Vendor"])
+            )
+            
+            has_electricals_and_dependencies = sum(
+                "Electricals_Vendor" in data.columns and 
+                "Dependencies_STATS Required" in data.columns and 
+                pd.notna(data["Electricals_Vendor"]) & 
+                pd.notna(data["Dependencies_STATS Required"])
+            )
+            
+            has_structural_and_dependencies = sum(
+                "Structural_Vendor" in data.columns and 
+                "Dependencies_STATS Required" in data.columns and 
+                pd.notna(data["Structural_Vendor"]) & 
+                pd.notna(data["Dependencies_STATS Required"])
+            )
+            
+            has_all_three = sum(
+                "Electricals_Vendor" in data.columns and 
+                "Structural_Vendor" in data.columns and 
+                "Dependencies_STATS Required" in data.columns and 
+                pd.notna(data["Electricals_Vendor"]) & 
+                pd.notna(data["Structural_Vendor"]) & 
+                pd.notna(data["Dependencies_STATS Required"])
+            )
+            
+            # Create a dataset for visualization
+            integration_data = pd.DataFrame([
+                {"Source": "Main Dataset Only", "Count": len(data) - (has_electricals + has_structural + has_dependencies) + has_electricals_and_structural + has_electricals_and_dependencies + has_structural_and_dependencies - 2*has_all_three},
+                {"Source": "With Electrical Data", "Count": has_electricals},
+                {"Source": "With Structural Data", "Count": has_structural},
+                {"Source": "With Dependencies Data", "Count": has_dependencies},
+                {"Source": "With All Three Sources", "Count": has_all_three}
+            ])
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Create bar chart of data integration
+                fig = px.bar(
+                    integration_data,
+                    x="Source",
+                    y="Count",
+                    title="Data Integration by Source",
+                    color="Count",
+                    color_continuous_scale="Viridis"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                # Show the overlaps in a pie chart
+                fig = px.pie(
+                    integration_data,
+                    values="Count",
+                    names="Source",
+                    title="Distribution of Integrated Data Sources"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Status breakdown for integrated data
+            st.subheader("Status Analysis by Data Source")
+            
+            if 'NS Status' in data.columns:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Electrical data status breakdown
+                    if "Electricals_Status" in data.columns:
+                        electrical_status = data[pd.notna(data["Electricals_Status"])]["Electricals_Status"].value_counts().reset_index()
+                        electrical_status.columns = ["Status", "Count"]
+                        
+                        fig = px.pie(
+                            electrical_status,
+                            values="Count",
+                            names="Status",
+                            title="Electrical Records by Status"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No electrical status data available")
+                
+                with col2:
+                    # Structural data status breakdown
+                    if "Structural_Status" in data.columns:
+                        structural_status = data[pd.notna(data["Structural_Status"])]["Structural_Status"].value_counts().reset_index()
+                        structural_status.columns = ["Status", "Count"]
+                        
+                        fig = px.pie(
+                            structural_status,
+                            values="Count",
+                            names="Status",
+                            title="Structural Records by Status"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("No structural status data available")
+            
+            # Analysis of dependencies data
+            if "Dependencies_STATS Required" in data.columns:
+                st.subheader("Dependencies Analysis")
+                
+                stats_required = data["Dependencies_STATS Required"].value_counts().reset_index()
+                stats_required.columns = ["STATS Required", "Count"]
+                
+                fig = px.pie(
+                    stats_required,
+                    values="Count",
+                    names="STATS Required",
+                    title="Distribution of STATS Requirements"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Correlation between different vendor services
+            st.subheader("Cross-Service Analysis")
+            
+            # Check if we have both electrical and structural vendors
+            if all(col in data.columns for col in ["Electricals_Vendor", "Structural_Vendor"]):
+                # Get records with both electrical and structural data
+                combined_data = data[pd.notna(data["Electricals_Vendor"]) & pd.notna(data["Structural_Vendor"])]
+                
+                if not combined_data.empty:
+                    # Create a cross-tabulation of vendors
+                    vendor_crosstab = pd.crosstab(
+                        combined_data["Electricals_Vendor"], 
+                        combined_data["Structural_Vendor"]
+                    )
+                    
+                    # Display heatmap of vendor relationships
+                    fig = px.imshow(
+                        vendor_crosstab,
+                        labels=dict(x="Structural Vendor", y="Electrical Vendor", color="Count"),
+                        title="Vendor Relationship Heatmap",
+                        color_continuous_scale="Viridis"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No records with both electrical and structural vendor data")
+            else:
+                st.info("Missing vendor data for cross-service analysis")
+
+        with tab7:
             st.header("Detailed Data")
             
             # Show raw data with search functionality
