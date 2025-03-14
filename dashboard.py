@@ -289,6 +289,10 @@ def main():
         # Sidebar filters
         st.sidebar.header("Filters")
         
+        # Initialize session state for tracking filter reset
+        if 'reset_filters' not in st.session_state:
+            st.session_state.reset_filters = False
+        
         # Date Range Filter
         st.sidebar.subheader("Date Range Filter")
         
@@ -296,7 +300,8 @@ def main():
         date_granularity = st.sidebar.radio(
             "Select Date Granularity", 
             ["Month-Year", "Week-Month-Year", "Week-Year"],
-            horizontal=True
+            horizontal=True,
+            key="date_granularity"
         )
         
         # Find all date columns that have valid dates
@@ -309,7 +314,8 @@ def main():
         if date_columns_with_data:
             selected_date_column = st.sidebar.selectbox(
                 "Select Date Column for Filtering",
-                date_columns_with_data
+                date_columns_with_data,
+                key="date_column"
             )
             
             # Get min and max dates from the selected column
@@ -334,12 +340,14 @@ def main():
                         start_month_idx = st.selectbox("Start Month", 
                                                      range(len(month_options)), 
                                                      format_func=lambda x: month_options[x],
-                                                     index=0)
+                                                     index=0 if st.session_state.reset_filters else st.session_state.get("start_month_idx", 0),
+                                                     key="start_month_idx")
                     with col2:
                         end_month_idx = st.selectbox("End Month", 
                                                    range(len(month_options)), 
                                                    format_func=lambda x: month_options[x],
-                                                   index=len(month_options)-1)
+                                                   index=len(month_options)-1 if st.session_state.reset_filters else st.session_state.get("end_month_idx", len(month_options)-1),
+                                                   key="end_month_idx")
                     
                     # Convert selected indices to dates
                     start_date = pd.to_datetime(month_options[start_month_idx]).date()
@@ -362,12 +370,14 @@ def main():
                         start_week_idx = st.selectbox("Start Week", 
                                                     range(len(week_options)), 
                                                     format_func=lambda x: week_options[x],
-                                                    index=0)
+                                                    index=0 if st.session_state.reset_filters else st.session_state.get("start_week_idx", 0),
+                                                    key="start_week_idx")
                     with col2:
                         end_week_idx = st.selectbox("End Week", 
                                                   range(len(week_options)), 
                                                   format_func=lambda x: week_options[x],
-                                                  index=len(week_options)-1)
+                                                  index=len(week_options)-1 if st.session_state.reset_filters else st.session_state.get("end_week_idx", len(week_options)-1),
+                                                  key="end_week_idx")
                     
                     # Convert selected indices to dates
                     start_date = weeks[start_week_idx].date()
@@ -388,12 +398,14 @@ def main():
                         start_week_idx = st.selectbox("Start Week", 
                                                     range(len(week_options)), 
                                                     format_func=lambda x: week_options[x],
-                                                    index=0)
+                                                    index=0 if st.session_state.reset_filters else st.session_state.get("start_week_idx", 0),
+                                                    key="start_week_idx")
                     with col2:
                         end_week_idx = st.selectbox("End Week", 
                                                   range(len(week_options)), 
                                                   format_func=lambda x: week_options[x],
-                                                  index=len(week_options)-1)
+                                                  index=len(week_options)-1 if st.session_state.reset_filters else st.session_state.get("end_week_idx", len(week_options)-1),
+                                                  key="end_week_idx")
                     
                     # Convert selected indices to dates
                     start_date = weeks[start_week_idx].date()
@@ -412,7 +424,12 @@ def main():
         # Filter by NS Status
         if 'NS Status' in data.columns:
             status_options = ['All'] + sorted(data['NS Status'].dropna().unique().tolist())
-            selected_status = st.sidebar.selectbox('NS Status', status_options)
+            selected_status = st.sidebar.selectbox(
+                'NS Status', 
+                status_options,
+                index=0 if st.session_state.reset_filters else st.session_state.get("ns_status_index", 0),
+                key="ns_status"
+            )
             
             if selected_status != 'All':
                 data = data[data['NS Status'] == selected_status]
@@ -420,7 +437,12 @@ def main():
         # Filter by Site Type
         if 'Site Type' in data.columns:
             site_type_options = ['All'] + sorted(data['Site Type'].dropna().unique().tolist())
-            selected_site_type = st.sidebar.selectbox('Site Type', site_type_options)
+            selected_site_type = st.sidebar.selectbox(
+                'Site Type', 
+                site_type_options,
+                index=0 if st.session_state.reset_filters else st.session_state.get("site_type_index", 0),
+                key="site_type"
+            )
             
             if selected_site_type != 'All':
                 data = data[data['Site Type'] == selected_site_type]
@@ -428,7 +450,12 @@ def main():
         # Filter by Client Priority
         if 'Client Priority' in data.columns:
             priority_options = ['All'] + sorted(data['Client Priority'].dropna().unique().tolist())
-            selected_priority = st.sidebar.selectbox('Client Priority', priority_options)
+            selected_priority = st.sidebar.selectbox(
+                'Client Priority', 
+                priority_options,
+                index=0 if st.session_state.reset_filters else st.session_state.get("priority_index", 0),
+                key="priority"
+            )
             
             if selected_priority != 'All':
                 data = data[data['Client Priority'] == selected_priority]
@@ -440,10 +467,35 @@ def main():
             project_names = sorted([str(name) for name in project_names if str(name).strip()])
             
             project_options = ['All'] + project_names
-            selected_project = st.sidebar.selectbox('KTL Project Name', project_options)
+            selected_project = st.sidebar.selectbox(
+                'KTL Project Name', 
+                project_options,
+                index=0 if st.session_state.reset_filters else st.session_state.get("project_index", 0),
+                key="project"
+            )
             
             if selected_project != 'All':
                 data = data[data['KTL Project Name'] == selected_project]
+        
+        # Add Clear Filters button
+        st.sidebar.markdown("---")
+        
+        def reset_filters():
+            st.session_state.reset_filters = True
+            # Reset all filter session states
+            for key in ["date_granularity", "date_column", "start_month_idx", "end_month_idx", 
+                        "start_week_idx", "end_week_idx", "ns_status", "site_type", 
+                        "priority", "project"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            return
+        
+        clear_filters = st.sidebar.button('🔄 Clear All Filters', on_click=reset_filters)
+        
+        # Reset the flag after all filters have been processed
+        if st.session_state.reset_filters:
+            st.session_state.reset_filters = False
+            st.rerun()
         
         # Dashboard tabs
         tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, new_tab, dd_tab = st.tabs([
