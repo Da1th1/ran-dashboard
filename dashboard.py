@@ -837,14 +837,17 @@ def main():
                         key="ga_snapshot_end_date"
                     )
                 
-                # Filter by date range
-                date_filtered_df = snapshot_df[
-                    (snapshot_df['GA\n(F)'].dt.date >= start_date) &
-                    (snapshot_df['GA\n(F)'].dt.date <= end_date)
-                ]
+                # Apply date range filter if dates are selected
+                if start_date and end_date:
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    snapshot_df = snapshot_df[
+                        (snapshot_df['GA\n(F)'] >= start_dt) &
+                        (snapshot_df['GA\n(F)'] <= end_dt)
+                    ]
                 
                 # Sort by GA\n(F) date
-                date_filtered_df = date_filtered_df.sort_values('GA\n(F)', ascending=True)
+                date_filtered_df = snapshot_df.sort_values('GA\n(F)', ascending=True)
                 
                 # Display the dataframe with styling
                 st.dataframe(
