@@ -839,8 +839,15 @@ def main():
                 
                 # Apply date range filter if dates are selected
                 if start_date and end_date:
+                    # Convert the GA\n(F) column to datetime64[ns] if it isn't already
+                    if not pd.api.types.is_datetime64_dtype(snapshot_df['GA\n(F)']):
+                        snapshot_df['GA\n(F)'] = pd.to_datetime(snapshot_df['GA\n(F)'])
+                    
+                    # Convert start_date and end_date to pandas datetime
                     start_dt = pd.to_datetime(start_date)
                     end_dt = pd.to_datetime(end_date)
+                    
+                    # Apply the filter using datetime64[ns] comparison
                     snapshot_df = snapshot_df[
                         (snapshot_df['GA\n(F)'] >= start_dt) &
                         (snapshot_df['GA\n(F)'] <= end_dt)
