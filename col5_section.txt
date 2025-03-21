@@ -1,0 +1,21 @@
+                with col5:
+                    # Count dependency cleared entries
+                    dependency_col = 'Dependency
+Clear'
+                    if dependency_col in beacon4_data.columns:
+                        dependency_cleared = beacon4_data[beacon4_data[dependency_col] == 'T'].shape[0]
+                        st.metric("Dependency Cleared", dependency_cleared)
+                    else:
+                        st.metric("Dependency Cleared", "N/A")
+
+                with col5:
+                    # Count dependency cleared entries
+                    dependency_cols = [col for col in beacon4_data.columns 
+                                     if "Dependency" in col and "Clear" in col]
+                    if dependency_cols:
+                        dependency_col = dependency_cols[0]  # Use the first matching column
+                        dependency_cleared = beacon4_data[beacon4_data[dependency_col] == "T"].shape[0]
+                        st.metric("Dependency Cleared", dependency_cleared)
+                    else:
+                        st.metric("Dependency Cleared", "N/A")
+                
